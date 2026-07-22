@@ -9,20 +9,25 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ========== TWILIO CONFIG ==========
-const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID || 'AC95d5f9dc91f11807734a883869ffc46d';
-const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN || '4922f43a66a4af3dc8629a9194a7b7a7';
+// ========== TWILIO CONFIG (READ FROM ENVIRONMENT) ==========
+const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID || '';
+const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN || '';
 const TWILIO_WHATSAPP_FROM = 'whatsapp:+14155238886';
 
 let twilioClient = null;
 let twilioEnabled = false;
 
-try {
-  twilioClient = twilio(twilioAccountSid, twilioAuthToken);
-  twilioEnabled = true;
-  console.log('✅ Twilio configured');
-} catch (e) {
-  console.log('⚠️ Twilio not configured');
+// Only initialize Twilio if credentials are provided
+if (twilioAccountSid && twilioAuthToken && twilioAccountSid !== '') {
+  try {
+    twilioClient = twilio(twilioAccountSid, twilioAuthToken);
+    twilioEnabled = true;
+    console.log('✅ Twilio configured successfully');
+  } catch (e) {
+    console.log('⚠️ Twilio initialization failed:', e.message);
+  }
+} else {
+  console.log('⚠️ Twilio not configured - running in mock mode');
 }
 
 // ========== MIDDLEWARE ==========
@@ -69,13 +74,12 @@ function writeDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-// ========== AI SIMULATION ==========
+// ========== AI FUNCTIONS ==========
 function analyzeText(text) {
-  const sentiments = ['positive', 'neutral', 'negative'];
   const words = text.split(' ');
   let score = 0;
-  const positiveWords = ['❤️', '♥️', 'love', 'happy', 'great', 'amazing', 'beautiful', 'wonderful', 'perfect', 'awesome'];
-  const negativeWords = ['sad', 'bad', 'terrible', 'awful', 'hate', 'disappointed', 'angry', 'upset'];
+  const positiveWords = ['love', 'happy', 'great', 'amazing', 'beautiful', 'wonderful', 'perfect', 'awesome', 'good', 'nice', 'excellent'];
+  const negativeWords = ['sad', 'bad', 'terrible', 'awful', 'hate', 'disappointed', 'angry', 'upset', 'worst', 'horrible'];
 
   words.forEach(w => {
     const clean = w.toLowerCase().replace(/[^a-z]/g, '');
@@ -88,11 +92,10 @@ function analyzeText(text) {
   if (score < 0) sentiment = 'negative';
 
   const suggestions = [];
-  if (sentiment === 'positive') suggestions.push('✨ Keep spreading the positivity!');
-  if (sentiment === 'negative') suggestions.push('💪 Stay strong, things will get better!');
-  if (text.length > 100) suggestions.push('📝 Great detailed post!');
-  if (text.includes('?') || text.includes('؟')) suggestions.push('🤔 Interesting question!');
-  if (suggestions.length === 0) suggestions.push('🌟 Nice share!');
+  if (sentiment === 'positive') suggestions.push('Keep spreading the positivity');
+  if (sentiment === 'negative') suggestions.push('Stay strong, things will get better');
+  if (text.length > 100) suggestions.push('Great detailed post');
+  if (suggestions.length === 0) suggestions.push('Nice share');
 
   return { sentiment, suggestions };
 }
@@ -108,7 +111,7 @@ function suggestHashtags(text) {
   const words = text.split(' ');
   const common = ['love', 'life', 'happy', 'friends', 'family', 'travel', 'food', 'work', 'music', 'art', 'tech', 'nature'];
   const found = common.filter(w => words.some(word => word.toLowerCase().includes(w)));
-  if (found.length === 0) return ['#facelove', '#social', '#community'];
+  if (found.length === 0) return ['facelove', 'social', 'community'];
   return found.map(w => '#' + w);
 }
 
@@ -117,39 +120,28 @@ function getAIAnalytics(db) {
   const totalPosts = db.posts.length;
   const totalMessages = db.messages.length;
   const totalLikes = db.posts.reduce((acc, p) => acc + (p.likes ? p.likes.length : 0), 0);
-
-  const sentimentSummary = { positive: 0, neutral: 0, negative: 0 };
-  db.posts.forEach(p => {
-    const analysis = analyzeText(p.text || '');
-    if (analysis.sentiment === 'positive') sentimentSummary.positive++;
-    else if (analysis.sentiment === 'negative') sentimentSummary.negative++;
-    else sentimentSummary.neutral++;
-  });
-
   const activeUsers = new Set();
   db.posts.forEach(p => activeUsers.add(p.userId));
   db.messages.forEach(m => { activeUsers.add(m.fromUserId); activeUsers.add(m.toUserId); });
-
   return {
     totalUsers,
     totalPosts,
     totalMessages,
     totalLikes,
     activeUsers: activeUsers.size,
-    sentimentSummary,
     engagementRate: totalUsers > 0 ? Math.round((totalLikes / totalUsers) * 10) / 10 : 0
   };
 }
 
 // ========== SEND OTP ==========
 async function sendOTP(phone, otp) {
-  if (!twilioEnabled) {
+  if (!twilioEnabled || !twilioClient) {
     console.log(`[MOCK] OTP for ${phone}: ${otp}`);
     return { success: true, mock: true };
   }
   try {
     await twilioClient.messages.create({
-      body: `🔐 Your FaceLove verification code: ${otp}`,
+      body: `Your FaceLove verification code: ${otp}`,
       from: TWILIO_WHATSAPP_FROM,
       to: `whatsapp:${phone}`
     });
@@ -182,43 +174,25 @@ app.get('/', (req, res) => {
           font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
           overflow: hidden;
         }
-        .splash{
-          text-align: center;
-          animation: float 3s ease-in-out infinite;
-        }
+        .splash{ text-align: center; animation: float 3s ease-in-out infinite; }
         .splash .logo{
-          width: 120px;
-          height: 120px;
+          width: 120px; height: 120px;
           background: linear-gradient(135deg, #ff3b5c, #ff6b8a);
           border-radius: 30px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          display: flex; align-items: center; justify-content: center;
           margin: 0 auto 20px;
           box-shadow: 0 0 60px rgba(255,59,92,0.3);
         }
-        .splash .logo i{
-          font-size: 50px;
-          color: #fff;
-        }
+        .splash .logo i{ font-size: 50px; color: #fff; }
         .splash h1{
-          color: #fff;
-          font-size: 48px;
-          font-weight: 800;
+          color: #fff; font-size: 48px; font-weight: 800;
           background: linear-gradient(135deg, #ff3b5c, #ff6b8a);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
         }
-        .splash p{
-          color: #888;
-          font-size: 16px;
-          margin-top: 8px;
-          letter-spacing: 2px;
-        }
+        .splash p{ color: #888; font-size: 16px; margin-top: 8px; letter-spacing: 2px; }
         .loader{
-          width: 60px;
-          height: 60px;
-          margin: 30px auto 0;
+          width: 60px; height: 60px; margin: 30px auto 0;
           border: 3px solid rgba(255,59,92,0.1);
           border-top: 3px solid #ff3b5c;
           border-radius: 50%;
@@ -274,16 +248,8 @@ app.get('/login', (req, res) => {
           box-shadow: 0 30px 80px rgba(0,0,0,0.8);
         }
         .auth .brand{ text-align: center; margin-bottom: 35px; }
-        .auth .brand i{
-          font-size: 35px;
-          color: #ff3b5c;
-          margin-bottom: 10px;
-        }
-        .auth .brand h1{
-          color: #fff;
-          font-size: 28px;
-          font-weight: 700;
-        }
+        .auth .brand i{ font-size: 35px; color: #ff3b5c; margin-bottom: 10px; }
+        .auth .brand h1{ color: #fff; font-size: 28px; font-weight: 700; }
         .auth .brand h1 span{ color: #ff3b5c; }
         .auth .brand p{ color: #666; font-size: 14px; margin-top: 4px; }
         .auth .error{
@@ -352,9 +318,7 @@ app.get('/login', (req, res) => {
         }
         .auth .links a:hover{ text-decoration: underline; }
         .auth .divider{ color: #333; margin: 0 8px; }
-        @media (max-width: 480px){
-          .auth{ padding: 30px 20px; }
-        }
+        @media (max-width: 480px){ .auth{ padding: 30px 20px; } }
       </style>
     </head>
     <body>
@@ -542,7 +506,7 @@ app.post('/register', async (req, res) => {
   writeDB(db);
   const result = await sendOTP(phone, otp);
   req.session.tempUser = { name, phone, password };
-  res.send(`
+  res.send(\`
     <!DOCTYPE html>
     <html>
     <head>
@@ -630,12 +594,12 @@ app.post('/register', async (req, res) => {
           <h1>Face<span>Love</span></h1>
           <p>Enter verification code</p>
         </div>
-        ${result.mock ? '<div class="info"><i class="fas fa-exclamation-triangle"></i> Test Mode: Code is <strong>' + otp + '</strong></div>' : ''}
+        \${result.mock ? '<div class="info"><i class="fas fa-exclamation-triangle"></i> Test Mode: Code is <strong>' + otp + '</strong></div>' : ''}
         <form action="/verify-otp" method="POST">
           <div class="form-group">
             <input type="text" name="otp" placeholder="000000" maxlength="6" required autofocus>
           </div>
-          <input type="hidden" name="phone" value="${phone}">
+          <input type="hidden" name="phone" value="\${phone}">
           <button type="submit" class="btn"><i class="fas fa-check-circle"></i> Verify</button>
         </form>
         <div class="links"><a href="/register"><i class="fas fa-arrow-left"></i> Change number</a></div>
@@ -643,7 +607,7 @@ app.post('/register', async (req, res) => {
       </div>
     </body>
     </html>
-  `);
+  \`);
 });
 
 app.post('/verify-otp', (req, res) => {
@@ -662,11 +626,9 @@ app.post('/verify-otp', (req, res) => {
     active: true,
     role: 'user',
     joined: new Date().toISOString(),
-    bio: 'Welcome to FaceLove!',
+    bio: 'Welcome to FaceLove',
     avatar: '',
-    cover: '',
-    location: '',
-    website: ''
+    cover: ''
   };
   db.users.push(newUser);
   db.otps = db.otps.filter(o => o.phone !== phone);
@@ -676,14 +638,14 @@ app.post('/verify-otp', (req, res) => {
   res.redirect('/dashboard');
 });
 
-// ========== DASHBOARD ==========
+// ========== DASHBOARD (FULL VERSION WITH ALL FEATURES) ==========
 app.get('/dashboard', (req, res) => {
   if (!req.session.userId) return res.redirect('/login');
   const db = readDB();
   const user = db.users.find(u => u.id === req.session.userId);
   if (!user) return res.redirect('/login');
 
-  res.send(`
+  res.send(\`
     <!DOCTYPE html>
     <html>
     <head>
@@ -699,13 +661,12 @@ app.get('/dashboard', (req, res) => {
           --primary-light: #ff6b8a;
           --bg-dark: #0a0a0a;
           --bg-card: #141414;
-          --bg-card-hover: #1a1a1a;
           --text-primary: #ffffff;
           --text-secondary: #aaa;
           --text-muted: #555;
           --border-color: #1f1f1f;
-          --shadow: 0 8px 32px rgba(0,0,0,0.6);
           --radius: 18px;
+          --shadow: 0 8px 32px rgba(0,0,0,0.6);
           --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         *{margin:0;padding:0;box-sizing:border-box;}
@@ -719,605 +680,300 @@ app.get('/dashboard', (req, res) => {
         ::-webkit-scrollbar{ width: 6px; }
         ::-webkit-scrollbar-track{ background: var(--bg-dark); }
         ::-webkit-scrollbar-thumb{ background: var(--primary); border-radius: 10px; }
-
-        /* Top Nav */
         .top-nav{
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 70px;
-          background: rgba(10,10,10,0.95);
-          backdrop-filter: blur(20px);
+          position: fixed; top: 0; left: 0; right: 0; height: 70px;
+          background: rgba(10,10,10,0.95); backdrop-filter: blur(20px);
           border-bottom: 1px solid var(--border-color);
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 24px;
-          z-index: 100;
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 0 24px; z-index: 100;
         }
-        .top-nav .brand{
-          font-size: 22px;
-          font-weight: 800;
-          color: #fff;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
+        .top-nav .brand{ font-size: 22px; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px; }
         .top-nav .brand i{ color: var(--primary); font-size: 24px; }
         .top-nav .brand span{ color: var(--primary); }
-        .top-nav .actions{
-          display: flex;
-          align-items: center;
-          gap: 18px;
-        }
+        .top-nav .actions{ display: flex; align-items: center; gap: 18px; }
         .top-nav .actions .user-badge{
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          color: var(--text-secondary);
-          font-size: 14px;
-          font-weight: 500;
-          padding: 6px 14px 6px 10px;
-          background: var(--bg-card);
-          border-radius: 30px;
-          border: 1px solid var(--border-color);
+          display: flex; align-items: center; gap: 10px; color: var(--text-secondary);
+          font-size: 14px; font-weight: 500; padding: 6px 14px 6px 10px;
+          background: var(--bg-card); border-radius: 30px; border: 1px solid var(--border-color);
         }
         .top-nav .actions .user-badge .avatar{
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
+          width: 32px; height: 32px; border-radius: 50%;
           background: linear-gradient(135deg, var(--primary), var(--primary-light));
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 700;
-          font-size: 14px;
-          color: #fff;
+          display: flex; align-items: center; justify-content: center;
+          font-weight: 700; font-size: 14px; color: #fff;
         }
-        .top-nav .actions a{
-          color: var(--text-secondary);
-          font-size: 20px;
-          transition: var(--transition);
-        }
+        .top-nav .actions a{ color: var(--text-secondary); font-size: 20px; transition: var(--transition); }
         .top-nav .actions a:hover{ color: var(--primary); }
-
-        /* Bottom Nav */
         .bottom-nav{
-          position: fixed;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          height: 75px;
-          background: rgba(10,10,10,0.97);
-          backdrop-filter: blur(20px);
+          position: fixed; bottom: 0; left: 0; right: 0; height: 75px;
+          background: rgba(10,10,10,0.97); backdrop-filter: blur(20px);
           border-top: 1px solid var(--border-color);
-          display: flex;
-          justify-content: space-around;
-          align-items: center;
-          z-index: 100;
-          padding: 0 8px;
+          display: flex; justify-content: space-around; align-items: center;
+          z-index: 100; padding: 0 8px;
         }
         .bottom-nav a{
-          color: var(--text-muted);
-          font-size: 22px;
-          transition: var(--transition);
-          text-decoration: none;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 2px;
-          padding: 6px 14px;
-          border-radius: 12px;
-          position: relative;
+          color: var(--text-muted); font-size: 22px; transition: var(--transition);
+          text-decoration: none; display: flex; flex-direction: column; align-items: center;
+          gap: 2px; padding: 6px 14px; border-radius: 12px; position: relative;
         }
         .bottom-nav a span{
-          font-size: 10px;
-          font-weight: 600;
-          letter-spacing: 0.5px;
-          color: var(--text-muted);
+          font-size: 10px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-muted);
         }
         .bottom-nav a:hover{ color: var(--text-primary); }
-        .bottom-nav a.active{
-          color: var(--primary);
-        }
+        .bottom-nav a.active{ color: var(--primary); }
         .bottom-nav a.active span{ color: var(--primary); }
         .bottom-nav a .badge{
-          position: absolute;
-          top: -4px;
-          right: -4px;
-          background: var(--primary);
-          color: #fff;
-          font-size: 9px;
-          font-weight: 700;
-          padding: 2px 6px;
-          border-radius: 20px;
-          min-width: 18px;
-          text-align: center;
+          position: absolute; top: -4px; right: -4px; background: var(--primary);
+          color: #fff; font-size: 9px; font-weight: 700; padding: 2px 6px;
+          border-radius: 20px; min-width: 18px; text-align: center;
         }
-
-        /* Content */
-        .content{
-          max-width: 780px;
-          margin: 0 auto;
-          padding: 0 16px;
-        }
+        .content{ max-width: 780px; margin: 0 auto; padding: 0 16px; }
         .page{ display: none; animation: fadeUp 0.4s ease; }
         .page.active{ display: block; }
         @keyframes fadeUp{ 0%{opacity:0;transform:translateY(20px)} 100%{opacity:1;transform:translateY(0)} }
-
-        /* Cards */
         .card{
-          background: var(--bg-card);
-          border-radius: var(--radius);
-          padding: 22px 24px;
-          margin-bottom: 16px;
-          border: 1px solid var(--border-color);
-          transition: var(--transition);
+          background: var(--bg-card); border-radius: var(--radius); padding: 22px 24px;
+          margin-bottom: 16px; border: 1px solid var(--border-color); transition: var(--transition);
         }
         .card:hover{ border-color: rgba(255,59,92,0.2); }
         .card .title{
-          font-size: 16px;
-          font-weight: 700;
-          color: #fff;
-          margin-bottom: 14px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
+          font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 14px;
+          display: flex; align-items: center; gap: 10px;
         }
         .card .title i{ color: var(--primary); }
-
-        /* Post Box */
         .post-box textarea{
-          width: 100%;
-          padding: 16px 18px;
-          background: rgba(30,30,30,0.6);
-          border: 2px solid transparent;
-          border-radius: 14px;
-          color: #fff;
-          font-size: 15px;
-          font-family: inherit;
-          resize: vertical;
-          min-height: 80px;
-          outline: none;
-          transition: var(--transition);
+          width: 100%; padding: 16px 18px; background: rgba(30,30,30,0.6);
+          border: 2px solid transparent; border-radius: 14px; color: #fff;
+          font-size: 15px; font-family: inherit; resize: vertical; min-height: 80px;
+          outline: none; transition: var(--transition);
         }
-        .post-box textarea:focus{
-          border-color: var(--primary);
-          background: rgba(40,40,40,0.8);
-        }
+        .post-box textarea:focus{ border-color: var(--primary); background: rgba(40,40,40,0.8); }
         .post-box .actions{
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-top: 14px;
-          flex-wrap: wrap;
-          gap: 10px;
+          display: flex; justify-content: space-between; align-items: center;
+          margin-top: 14px; flex-wrap: wrap; gap: 10px;
         }
         .post-box .actions .media-options{
-          display: flex;
-          gap: 16px;
-          align-items: center;
+          display: flex; gap: 16px; align-items: center;
         }
         .post-box .actions .media-options i{
-          color: var(--text-muted);
-          font-size: 18px;
-          cursor: pointer;
-          transition: var(--transition);
+          color: var(--text-muted); font-size: 18px; cursor: pointer; transition: var(--transition);
         }
         .post-box .actions .media-options i:hover{ color: var(--primary); }
         .post-box .actions .media-options input{
-          background: rgba(30,30,30,0.6);
-          border: 1px solid var(--border-color);
-          border-radius: 30px;
-          padding: 8px 16px;
-          color: #fff;
-          font-size: 13px;
-          outline: none;
-          width: 160px;
-          transition: var(--transition);
+          background: rgba(30,30,30,0.6); border: 1px solid var(--border-color);
+          border-radius: 30px; padding: 8px 16px; color: #fff; font-size: 13px;
+          outline: none; width: 160px; transition: var(--transition);
         }
         .post-box .actions .media-options input:focus{ border-color: var(--primary); }
         .post-box .actions .btn-post{
           background: linear-gradient(135deg, var(--primary), var(--primary-light));
-          border: none;
-          padding: 12px 32px;
-          border-radius: 30px;
-          color: #fff;
-          font-weight: 700;
-          font-size: 14px;
-          cursor: pointer;
-          transition: var(--transition);
+          border: none; padding: 12px 32px; border-radius: 30px; color: #fff;
+          font-weight: 700; font-size: 14px; cursor: pointer; transition: var(--transition);
         }
         .post-box .actions .btn-post:hover{
-          transform: translateY(-2px);
-          box-shadow: 0 8px 25px rgba(255,59,92,0.3);
+          transform: translateY(-2px); box-shadow: 0 8px 25px rgba(255,59,92,0.3);
         }
         .post-box .actions .btn-post i{ margin-right: 6px; }
-
-        /* Feed Post */
         .feed-post{
-          background: var(--bg-card);
-          border-radius: var(--radius);
-          padding: 20px 22px;
-          margin-bottom: 14px;
-          border: 1px solid var(--border-color);
-          transition: var(--transition);
+          background: var(--bg-card); border-radius: var(--radius); padding: 20px 22px;
+          margin-bottom: 14px; border: 1px solid var(--border-color); transition: var(--transition);
         }
         .feed-post:hover{ border-color: rgba(255,59,92,0.15); }
         .feed-post .header{
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          margin-bottom: 12px;
+          display: flex; align-items: center; gap: 14px; margin-bottom: 12px;
         }
         .feed-post .header .avatar{
-          width: 48px;
-          height: 48px;
-          border-radius: 50%;
+          width: 48px; height: 48px; border-radius: 50%;
           background: linear-gradient(135deg, var(--primary), var(--primary-light));
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 18px;
-          font-weight: 700;
-          color: #fff;
-          flex-shrink: 0;
-          cursor: pointer;
+          display: flex; align-items: center; justify-content: center; font-size: 18px;
+          font-weight: 700; color: #fff; flex-shrink: 0; cursor: pointer;
         }
         .feed-post .header .info{ flex: 1; }
         .feed-post .header .info .name{
-          font-weight: 700;
-          font-size: 15px;
-          color: #fff;
-          cursor: pointer;
+          font-weight: 700; font-size: 15px; color: #fff; cursor: pointer;
         }
         .feed-post .header .info .name:hover{ color: var(--primary); }
         .feed-post .header .info .time{
-          font-size: 12px;
-          color: var(--text-muted);
-          margin-top: 2px;
+          font-size: 12px; color: var(--text-muted); margin-top: 2px;
         }
         .feed-post .header .info .time i{ margin-right: 4px; }
         .feed-post .body{
-          margin: 6px 0 14px;
-          line-height: 1.8;
-          font-size: 15px;
+          margin: 6px 0 14px; line-height: 1.8; font-size: 15px;
         }
         .feed-post .body .media{
-          margin-top: 12px;
-          border-radius: 14px;
-          overflow: hidden;
+          margin-top: 12px; border-radius: 14px; overflow: hidden;
         }
-        .feed-post .body .media img,
-        .feed-post .body .media video{
-          width: 100%;
-          max-height: 450px;
-          object-fit: cover;
-          display: block;
+        .feed-post .body .media img, .feed-post .body .media video{
+          width: 100%; max-height: 450px; object-fit: cover; display: block;
         }
         .feed-post .body .ai-badge{
-          display: inline-block;
-          background: rgba(255,59,92,0.1);
-          color: var(--primary);
-          font-size: 11px;
-          padding: 4px 12px;
-          border-radius: 20px;
-          margin-top: 8px;
-          font-weight: 600;
+          display: inline-block; background: rgba(255,59,92,0.1);
+          color: var(--primary); font-size: 11px; padding: 4px 12px;
+          border-radius: 20px; margin-top: 8px; font-weight: 600;
         }
         .feed-post .body .ai-badge i{ margin-right: 4px; }
         .feed-post .actions{
-          display: flex;
-          gap: 24px;
-          padding-top: 14px;
-          border-top: 1px solid var(--border-color);
+          display: flex; gap: 24px; padding-top: 14px; border-top: 1px solid var(--border-color);
         }
         .feed-post .actions button{
-          background: none;
-          border: none;
-          color: var(--text-muted);
-          font-size: 15px;
-          cursor: pointer;
-          transition: var(--transition);
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-weight: 500;
+          background: none; border: none; color: var(--text-muted);
+          font-size: 15px; cursor: pointer; transition: var(--transition);
+          display: flex; align-items: center; gap: 6px; font-weight: 500;
         }
         .feed-post .actions button:hover{ color: #fff; }
         .feed-post .actions button.liked{ color: var(--primary); }
         .feed-post .comments{
-          margin-top: 14px;
-          padding-top: 14px;
-          border-top: 1px solid var(--border-color);
+          margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-color);
         }
         .feed-post .comments .comment{
-          display: flex;
-          gap: 10px;
-          margin: 6px 0;
-          font-size: 14px;
+          display: flex; gap: 10px; margin: 6px 0; font-size: 14px;
         }
-        .feed-post .comments .comment .cname{
-          font-weight: 700;
-          color: var(--primary);
-        }
+        .feed-post .comments .comment .cname{ font-weight: 700; color: var(--primary); }
         .feed-post .comments .comment .ctext{ color: #ccc; }
         .feed-post .comments input{
-          width: 100%;
-          padding: 10px 16px;
-          background: rgba(30,30,30,0.6);
-          border: 2px solid transparent;
-          border-radius: 30px;
-          color: #fff;
-          font-size: 14px;
-          outline: none;
-          margin-top: 8px;
-          transition: var(--transition);
+          width: 100%; padding: 10px 16px; background: rgba(30,30,30,0.6);
+          border: 2px solid transparent; border-radius: 30px; color: #fff;
+          font-size: 14px; outline: none; margin-top: 8px; transition: var(--transition);
         }
         .feed-post .comments input:focus{ border-color: var(--primary); }
-
-        /* Profile */
         .profile-header{
-          text-align: center;
-          padding: 30px 0;
+          text-align: center; padding: 20px 0;
         }
         .profile-header .avatar{
-          width: 100px;
-          height: 100px;
-          border-radius: 50%;
+          width: 100px; height: 100px; border-radius: 50%;
           background: linear-gradient(135deg, var(--primary), var(--primary-light));
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 36px;
-          font-weight: 700;
-          color: #fff;
-          margin: 0 auto 16px;
-          box-shadow: 0 0 40px rgba(255,59,92,0.2);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 36px; font-weight: 700; color: #fff;
+          margin: 0 auto 16px; box-shadow: 0 0 40px rgba(255,59,92,0.2);
         }
-        .profile-header .name{
-          font-size: 24px;
-          font-weight: 700;
-          color: #fff;
-        }
-        .profile-header .bio{
-          color: var(--text-secondary);
-          font-size: 14px;
-          margin-top: 4px;
-        }
+        .profile-header .name{ font-size: 24px; font-weight: 700; color: #fff; }
+        .profile-header .bio{ color: var(--text-secondary); font-size: 14px; margin-top: 4px; }
         .profile-header .stats{
-          display: flex;
-          justify-content: center;
-          gap: 40px;
-          margin-top: 20px;
+          display: flex; justify-content: center; gap: 40px; margin-top: 20px;
         }
-        .profile-header .stats .stat{
-          text-align: center;
-        }
+        .profile-header .stats .stat{ text-align: center; }
         .profile-header .stats .stat .num{
-          font-size: 20px;
-          font-weight: 700;
-          color: #fff;
+          font-size: 20px; font-weight: 700; color: #fff;
         }
-        .profile-header .stats .stat .label{
-          font-size: 12px;
-          color: var(--text-muted);
-        }
+        .profile-header .stats .stat .label{ font-size: 12px; color: var(--text-muted); }
         .profile-header .edit-btn{
-          margin-top: 16px;
-          padding: 10px 30px;
-          background: var(--bg-card);
-          border: 1px solid var(--border-color);
-          border-radius: 30px;
-          color: #fff;
-          font-weight: 600;
-          cursor: pointer;
-          transition: var(--transition);
+          margin-top: 16px; padding: 10px 30px; background: var(--bg-card);
+          border: 1px solid var(--border-color); border-radius: 30px; color: #fff;
+          font-weight: 600; cursor: pointer; transition: var(--transition);
         }
         .profile-header .edit-btn:hover{ border-color: var(--primary); }
-
-        /* Friends & Chat */
         .friend-item{
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          padding: 12px 16px;
-          background: rgba(30,30,30,0.4);
-          border-radius: 14px;
-          margin-bottom: 10px;
-          transition: var(--transition);
-          cursor: pointer;
+          display: flex; align-items: center; gap: 14px; padding: 12px 16px;
+          background: rgba(30,30,30,0.4); border-radius: 14px; margin-bottom: 10px;
+          transition: var(--transition); cursor: pointer;
         }
         .friend-item:hover{ background: rgba(40,40,40,0.6); }
         .friend-item .avatar{
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
+          width: 44px; height: 44px; border-radius: 50%;
           background: linear-gradient(135deg, var(--primary), var(--primary-light));
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 700;
-          font-size: 16px;
-          color: #fff;
-          flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center;
+          font-weight: 700; font-size: 16px; color: #fff; flex-shrink: 0;
         }
         .friend-item .info{ flex: 1; }
         .friend-item .info .name{ font-weight: 600; color: #fff; }
         .friend-item .info .status{ font-size: 12px; color: var(--text-muted); }
         .friend-item .actions{
-          display: flex;
-          gap: 6px;
-          flex-wrap: wrap;
+          display: flex; gap: 6px; flex-wrap: wrap;
         }
         .friend-item .actions .btn-sm{
-          padding: 6px 16px;
-          border: none;
-          border-radius: 30px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: var(--transition);
+          padding: 6px 16px; border: none; border-radius: 30px; font-size: 12px;
+          font-weight: 600; cursor: pointer; transition: var(--transition);
         }
         .friend-item .actions .btn-sm.primary{ background: var(--primary); color: #fff; }
         .friend-item .actions .btn-sm.primary:hover{ background: var(--primary-dark); }
-        .friend-item .actions .btn-sm.secondary{ background: rgba(255,255,255,0.05); color: #aaa; }
-        .friend-item .actions .btn-sm.secondary:hover{ background: rgba(255,255,255,0.1); }
         .friend-item .actions .btn-sm.success{ background: #27ae60; color: #fff; }
         .friend-item .actions .btn-sm.success:hover{ background: #2ecc71; }
         .friend-item .actions .btn-sm.danger{ background: #c0392b; color: #fff; }
         .friend-item .actions .btn-sm.danger:hover{ background: #e74c3c; }
         .friend-item .actions i{
-          font-size: 18px;
-          color: var(--text-muted);
-          cursor: pointer;
-          transition: var(--transition);
-          padding: 6px;
+          font-size: 18px; color: var(--text-muted); cursor: pointer;
+          transition: var(--transition); padding: 6px;
         }
         .friend-item .actions i:hover{ color: var(--primary); }
-
-        /* Chat */
         .chat-messages{
-          background: rgba(30,30,30,0.3);
-          border-radius: 14px;
-          padding: 16px;
-          max-height: 350px;
-          overflow-y: auto;
-          margin-bottom: 12px;
+          background: rgba(30,30,30,0.3); border-radius: 14px; padding: 16px;
+          max-height: 350px; overflow-y: auto; margin-bottom: 12px;
         }
         .chat-messages .msg{
-          margin: 4px 0;
-          padding: 8px 14px;
-          border-radius: 12px;
-          background: rgba(255,255,255,0.03);
-          font-size: 14px;
+          margin: 4px 0; padding: 8px 14px; border-radius: 12px;
+          background: rgba(255,255,255,0.03); font-size: 14px;
         }
         .chat-messages .msg .sender{ font-weight: 700; color: var(--primary); margin-right: 6px; }
         .chat-messages .msg .text{ color: #ccc; }
         .chat-input{
-          display: flex;
-          gap: 10px;
+          display: flex; gap: 10px;
         }
         .chat-input input{
-          flex: 1;
-          padding: 12px 18px;
-          background: rgba(30,30,30,0.6);
-          border: 2px solid transparent;
-          border-radius: 30px;
-          color: #fff;
-          font-size: 14px;
-          outline: none;
-          transition: var(--transition);
+          flex: 1; padding: 12px 18px; background: rgba(30,30,30,0.6);
+          border: 2px solid transparent; border-radius: 30px; color: #fff;
+          font-size: 14px; outline: none; transition: var(--transition);
         }
         .chat-input input:focus{ border-color: var(--primary); }
         .chat-input button{
-          padding: 12px 24px;
-          background: linear-gradient(135deg, var(--primary), var(--primary-light));
-          border: none;
-          border-radius: 30px;
-          color: #fff;
-          font-weight: 700;
-          cursor: pointer;
-          transition: var(--transition);
+          padding: 12px 24px; background: linear-gradient(135deg, var(--primary), var(--primary-light));
+          border: none; border-radius: 30px; color: #fff; font-weight: 700;
+          cursor: pointer; transition: var(--transition);
         }
         .chat-input button:hover{ transform: translateY(-2px); }
-
-        /* Admin */
         .admin-stats{
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-          gap: 12px;
-          margin-bottom: 20px;
+          display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+          gap: 12px; margin-bottom: 20px;
         }
         .admin-stats .stat{
-          background: rgba(30,30,30,0.4);
-          padding: 16px;
-          border-radius: 14px;
-          text-align: center;
+          background: rgba(30,30,30,0.4); padding: 16px; border-radius: 14px; text-align: center;
         }
         .admin-stats .stat .num{
-          font-size: 24px;
-          font-weight: 700;
-          color: #fff;
+          font-size: 24px; font-weight: 700; color: #fff;
         }
         .admin-stats .stat .label{
-          font-size: 11px;
-          color: var(--text-muted);
-          margin-top: 4px;
+          font-size: 11px; color: var(--text-muted); margin-top: 4px;
         }
         .admin-stats .stat .num.primary{ color: var(--primary); }
         .admin-stats .stat .num.green{ color: #27ae60; }
         .admin-stats .stat .num.blue{ color: #3498db; }
         .admin-stats .stat .num.gold{ color: #f1c40f; }
-
         .admin-item{
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 10px 0;
+          display: flex; align-items: center; gap: 12px; padding: 10px 0;
           border-bottom: 1px solid var(--border-color);
         }
         .admin-item .info{ flex: 1; }
         .admin-item .info .name{ font-weight: 600; color: #fff; }
         .admin-item .info .sub{ font-size: 12px; color: var(--text-muted); }
         .admin-item .badge{
-          font-size: 11px;
-          padding: 4px 12px;
-          border-radius: 20px;
-          font-weight: 600;
+          font-size: 11px; padding: 4px 12px; border-radius: 20px; font-weight: 600;
         }
         .admin-item .badge.active{ background: rgba(39,174,96,0.2); color: #27ae60; }
         .admin-item .badge.inactive{ background: rgba(192,57,43,0.2); color: #e74c3c; }
-        .admin-item .badge.pending{ background: rgba(241,196,15,0.2); color: #f1c40f; }
         .admin-item .actions{ display: flex; gap: 4px; }
         .admin-item .actions .btn-xs{
-          padding: 4px 12px;
-          border: none;
-          border-radius: 20px;
-          font-size: 11px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: var(--transition);
+          padding: 4px 12px; border: none; border-radius: 20px; font-size: 11px;
+          font-weight: 600; cursor: pointer; transition: var(--transition);
         }
         .admin-item .actions .btn-xs.danger{ background: #c0392b; color: #fff; }
         .admin-item .actions .btn-xs.danger:hover{ background: #e74c3c; }
         .admin-item .actions .btn-xs.success{ background: #27ae60; color: #fff; }
         .admin-item .actions .btn-xs.success:hover{ background: #2ecc71; }
-
-        /* Empty state */
         .empty{
-          text-align: center;
-          padding: 40px 0;
-          color: var(--text-muted);
+          text-align: center; padding: 40px 0; color: var(--text-muted);
         }
         .empty i{ font-size: 40px; display: block; margin-bottom: 12px; opacity: 0.3; }
         .empty p{ font-size: 14px; }
-
-        /* Search */
         .search-bar{
-          display: flex;
-          align-items: center;
-          background: rgba(30,30,30,0.6);
-          border-radius: 30px;
-          padding: 4px 18px;
-          margin-bottom: 16px;
-          border: 2px solid transparent;
-          transition: var(--transition);
+          display: flex; align-items: center; background: rgba(30,30,30,0.6);
+          border-radius: 30px; padding: 4px 18px; margin-bottom: 16px;
+          border: 2px solid transparent; transition: var(--transition);
         }
         .search-bar:focus-within{ border-color: var(--primary); }
         .search-bar i{ color: var(--text-muted); font-size: 16px; }
         .search-bar input{
-          flex: 1;
-          background: transparent;
-          border: none;
-          padding: 12px 14px;
-          color: #fff;
-          font-size: 14px;
-          outline: none;
+          flex: 1; background: transparent; border: none; padding: 12px 14px;
+          color: #fff; font-size: 14px; outline: none;
         }
-
-        /* Responsive */
         @media (max-width: 640px){
           .content{ padding: 0 12px; }
           .card{ padding: 16px; }
@@ -1332,26 +988,22 @@ app.get('/dashboard', (req, res) => {
           .post-box .actions .media-options input{ width: 100%; }
           .profile-header .stats{ gap: 20px; }
           .admin-stats{ grid-template-columns: repeat(2, 1fr); }
-          .feed-post{ padding: 16px; }
         }
       </style>
     </head>
     <body>
-      <!-- Top Navigation -->
       <nav class="top-nav">
         <div class="brand"><i class="fas fa-heart"></i>Face<span>Love</span></div>
         <div class="actions">
           <div class="user-badge">
-            <div class="avatar">${user.name.charAt(0).toUpperCase()}</div>
-            ${user.name}
+            <div class="avatar">\${user.name.charAt(0).toUpperCase()}</div>
+            \${user.name}
           </div>
           <a href="/logout" title="Sign Out"><i class="fas fa-sign-out-alt"></i></a>
         </div>
       </nav>
 
-      <!-- Content -->
       <div class="content">
-        <!-- Feed -->
         <div id="page-feed" class="page active">
           <div class="card post-box">
             <textarea id="postText" placeholder="What's on your mind? Share your thoughts..." rows="3"></textarea>
@@ -1367,7 +1019,6 @@ app.get('/dashboard', (req, res) => {
           <div id="feedContainer"></div>
         </div>
 
-        <!-- Search -->
         <div id="page-search" class="page">
           <div class="search-bar">
             <i class="fas fa-search"></i>
@@ -1376,13 +1027,12 @@ app.get('/dashboard', (req, res) => {
           <div id="searchResults"></div>
         </div>
 
-        <!-- Profile -->
         <div id="page-profile" class="page">
           <div class="card">
             <div class="profile-header">
-              <div class="avatar">${user.name.charAt(0).toUpperCase()}</div>
-              <div class="name">${user.name}</div>
-              <div class="bio">${user.bio || 'Welcome to FaceLove! Share your moments.'}</div>
+              <div class="avatar">\${user.name.charAt(0).toUpperCase()}</div>
+              <div class="name">\${user.name}</div>
+              <div class="bio">\${user.bio || 'Welcome to FaceLove! Share your moments.'}</div>
               <div class="stats">
                 <div class="stat"><div class="num" id="postCount">0</div><div class="label">Posts</div></div>
                 <div class="stat"><div class="num" id="friendCount">0</div><div class="label">Friends</div></div>
@@ -1394,7 +1044,6 @@ app.get('/dashboard', (req, res) => {
           <div id="profilePosts"></div>
         </div>
 
-        <!-- Friends -->
         <div id="page-friends" class="page">
           <div class="card">
             <div class="title"><i class="fas fa-user-friends"></i> Friends</div>
@@ -1410,7 +1059,6 @@ app.get('/dashboard', (req, res) => {
           </div>
         </div>
 
-        <!-- Chat -->
         <div id="page-chat" class="page">
           <div class="card">
             <div class="title"><i class="fas fa-comments"></i> Chats</div>
@@ -1426,7 +1074,6 @@ app.get('/dashboard', (req, res) => {
           </div>
         </div>
 
-        <!-- Admin -->
         <div id="page-admin" class="page">
           <div class="card">
             <div class="title"><i class="fas fa-crown"></i> Admin Dashboard</div>
@@ -1437,21 +1084,19 @@ app.get('/dashboard', (req, res) => {
         </div>
       </div>
 
-      <!-- Bottom Navigation -->
       <nav class="bottom-nav">
         <a href="#" data-page="feed" class="active"><i class="fas fa-home"></i><span>Feed</span></a>
         <a href="#" data-page="search"><i class="fas fa-search"></i><span>Search</span></a>
         <a href="#" data-page="profile"><i class="fas fa-user"></i><span>Profile</span></a>
         <a href="#" data-page="friends"><i class="fas fa-users"></i><span>Friends</span></a>
         <a href="#" data-page="chat"><i class="fas fa-comment-dots"></i><span>Chat</span></a>
-        ${user.role === 'admin' ? '<a href="#" data-page="admin"><i class="fas fa-crown"></i><span>Admin</span></a>' : ''}
+        \${user.role === 'admin' ? '<a href="#" data-page="admin"><i class="fas fa-crown"></i><span>Admin</span></a>' : ''}
       </nav>
 
       <script>
-        const currentUser = { id: "${user.id}", name: "${user.name}", role: "${user.role || 'user'}" };
+        const currentUser = { id: "\${user.id}", name: "\${user.name}", role: "\${user.role || 'user'}" };
         let currentChatWith = null;
 
-        // Navigation
         document.querySelectorAll('.bottom-nav a[data-page]').forEach(el => {
           el.addEventListener('click', function(e) {
             e.preventDefault();
@@ -1469,7 +1114,6 @@ app.get('/dashboard', (req, res) => {
           });
         });
 
-        // ========== FEED ==========
         async function loadFeed() {
           try {
             const res = await fetch('/api/posts');
@@ -1500,7 +1144,7 @@ app.get('/dashboard', (req, res) => {
               <div class="body">
                 \${p.text || ''}
                 \${mediaHtml}
-                <div class="ai-badge"><i class="fas fa-robot"></i> AI: \${sentimentIcon} \${ai.sentiment} ${ai.suggestions ? ' | 💡 '+ai.suggestions.slice(0,2).join(' • ') : ''}</div>
+                <div class="ai-badge"><i class="fas fa-robot"></i> AI: \${sentimentIcon} \${ai.sentiment} \${ai.suggestions ? ' | 💡 '+ai.suggestions.slice(0,2).join(' • ') : ''}</div>
               </div>
               <div class="actions">
                 <button onclick="toggleLike('\${p.id}')" class="\${liked ? 'liked' : ''}">
@@ -1572,7 +1216,6 @@ app.get('/dashboard', (req, res) => {
           }
         }
 
-        // ========== SEARCH ==========
         async function searchContent() {
           const q = document.getElementById('searchInput').value;
           if (!q.trim()) { document.getElementById('searchResults').innerHTML = ''; return; }
@@ -1595,7 +1238,6 @@ app.get('/dashboard', (req, res) => {
           } catch(e) { console.error(e); }
         }
 
-        // ========== PROFILE ==========
         async function loadProfile() {
           try {
             const res = await fetch('/api/profile');
@@ -1611,7 +1253,7 @@ app.get('/dashboard', (req, res) => {
         }
 
         function editProfile() {
-          const newBio = prompt('Update your bio:', '${user.bio || 'Welcome to FaceLove!'}');
+          const newBio = prompt('Update your bio:', '\${user.bio || 'Welcome to FaceLove!'}');
           if (newBio !== null) {
             fetch('/api/profile/update', {
               method: 'POST',
@@ -1625,20 +1267,16 @@ app.get('/dashboard', (req, res) => {
           alert('Viewing profile of user: ' + userId);
         }
 
-        // ========== FRIENDS ==========
         async function loadFriends() {
           try {
             const res = await fetch('/api/friends');
             const data = await res.json();
-            
             document.getElementById('friendsList').innerHTML = data.friends.length ? 
               data.friends.map(f => '<div class="friend-item"><div class="avatar">'+f.name.charAt(0).toUpperCase()+'</div><div class="info"><div class="name">'+f.name+'</div><div class="status"><i class="fas fa-check-circle" style="color:#27ae60;"></i> Friend</div></div></div>').join('') :
               '<div class="empty"><i class="fas fa-user-friends"></i><p>No friends yet</p></div>';
-
             document.getElementById('friendRequests').innerHTML = data.requests.length ?
               data.requests.map(r => '<div class="friend-item"><div class="avatar">'+r.name.charAt(0).toUpperCase()+'</div><div class="info"><div class="name">'+r.name+'</div><div class="status"><i class="fas fa-clock" style="color:#f1c40f;"></i> Pending</div></div><div class="actions"><button class="btn-sm success" onclick="acceptFriend(\\''+r.id+'\\')"><i class="fas fa-check"></i> Accept</button><button class="btn-sm danger" onclick="rejectFriend(\\''+r.id+'\\')"><i class="fas fa-times"></i> Decline</button></div></div>').join('') :
               '<div class="empty"><i class="fas fa-inbox"></i><p>No pending requests</p></div>';
-
             document.getElementById('suggestedUsers').innerHTML = data.suggested.length ?
               data.suggested.map(u => '<div class="friend-item"><div class="avatar">'+u.name.charAt(0).toUpperCase()+'</div><div class="info"><div class="name">'+u.name+'</div><div class="status">'+u.phone+'</div></div><div class="actions"><button class="btn-sm primary" onclick="sendFriendRequest(\\''+u.id+'\\')"><i class="fas fa-user-plus"></i> Add</button></div></div>').join('') :
               '<div class="empty"><i class="fas fa-check"></i><p>All caught up!</p></div>';
@@ -1678,7 +1316,6 @@ app.get('/dashboard', (req, res) => {
           } catch(e) { alert('Failed to reject'); }
         }
 
-        // ========== CHAT ==========
         async function loadChatList() {
           try {
             const res = await fetch('/api/chat/list');
@@ -1729,32 +1366,26 @@ app.get('/dashboard', (req, res) => {
           document.getElementById('chatList').style.display = 'block';
         }
 
-        // ========== ADMIN ==========
         async function loadAdmin() {
           try {
             const res = await fetch('/api/admin/data');
             const data = await res.json();
-            
-            // Stats
             document.getElementById('adminStats').innerHTML = \`
               <div class="stat"><div class="num primary">\${data.stats.totalUsers}</div><div class="label">Users</div></div>
               <div class="stat"><div class="num green">\${data.stats.totalPosts}</div><div class="label">Posts</div></div>
               <div class="stat"><div class="num blue">\${data.stats.totalLikes}</div><div class="label">Likes</div></div>
               <div class="stat"><div class="num gold">\${data.stats.activeUsers}</div><div class="label">Active</div></div>
             \`;
-
             let html = '';
             html += '<div style="margin:16px 0 8px;"><strong style="color:var(--primary);"><i class="fas fa-users"></i> Users</strong></div>';
             data.users.forEach(u => {
               html += '<div class="admin-item"><div class="info"><div class="name">'+u.name+'</div><div class="sub">'+u.phone+' • Joined '+new Date(u.joined).toLocaleDateString()+'</div></div><div class="badge '+(u.active ? 'active' : 'inactive')+'">'+(u.active ? 'Active' : 'Inactive')+'</div><div class="actions"><button class="btn-xs '+(u.active ? 'danger' : 'success')+'" onclick="adminToggleUser(\\''+u.id+'\\', '+(u.active ? 'false' : 'true')+')">'+(u.active ? 'Deactivate' : 'Activate')+'</button></div></div>';
             });
-
             html += '<div style="margin:20px 0 8px;"><strong style="color:var(--primary);"><i class="fas fa-newspaper"></i> Posts</strong></div>';
             data.posts.forEach(p => {
               html += '<div class="admin-item"><div class="info"><div class="name">'+p.text.substring(0,60)+(p.text.length>60?'...':'')+'</div><div class="sub">by '+p.userName+' • '+new Date(p.timestamp).toLocaleString()+'</div></div><div class="actions"><button class="btn-xs danger" onclick="adminDeletePost(\\''+p.id+'\\')">Delete</button></div></div>';
             });
             if (!data.posts.length) html += '<div class="empty"><i class="fas fa-inbox"></i><p>No posts</p></div>';
-
             document.getElementById('adminContent').innerHTML = html;
           } catch(e) { console.error(e); }
         }
@@ -1782,13 +1413,12 @@ app.get('/dashboard', (req, res) => {
           } catch(e) { alert('Failed to delete post'); }
         }
 
-        // Initial load
         loadFeed();
         setInterval(loadFeed, 30000);
       </script>
     </body>
     </html>
-  `);
+  \`);
 });
 
 // ========== LOGOUT ==========
@@ -1799,7 +1429,7 @@ app.get('/logout', (req, res) => {
 
 // ========== FORGOT PASSWORD ==========
 app.get('/forgot-password', (req, res) => {
-  res.send(`
+  res.send(\`
     <!DOCTYPE html>
     <html>
     <head>
@@ -1892,7 +1522,7 @@ app.get('/forgot-password', (req, res) => {
       </div>
     </body>
     </html>
-  `);
+  \`);
 });
 
 app.post('/forgot-password', async (req, res) => {
@@ -2023,8 +1653,6 @@ app.post('/reset-password', (req, res) => {
 });
 
 // ========== API ROUTES ==========
-
-// Posts
 app.get('/api/posts', (req, res) => {
   const db = readDB();
   const posts = db.posts.sort((a,b) => b.timestamp - a.timestamp);
@@ -2088,7 +1716,6 @@ app.post('/api/posts/:postId/comment', (req, res) => {
   res.json({ success: true });
 });
 
-// Search
 app.get('/api/search', (req, res) => {
   const q = req.query.q ? req.query.q.toLowerCase() : '';
   const db = readDB();
@@ -2103,19 +1730,16 @@ app.get('/api/search', (req, res) => {
   res.json({ users, posts: enriched });
 });
 
-// Profile
 app.get('/api/profile', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
   const db = readDB();
   const user = db.users.find(u => u.id === req.session.userId);
   if (!user) return res.status(404).json({ error: 'Not found' });
-  
   const userPosts = db.posts.filter(p => p.userId === req.session.userId);
   const friends = db.friendships.filter(f => 
     (f.fromUserId === req.session.userId || f.toUserId === req.session.userId) && f.status === 'accepted'
   );
   const totalLikes = userPosts.reduce((acc, p) => acc + (p.likes ? p.likes.length : 0), 0);
-  
   res.json({
     user: user,
     posts: userPosts.length,
@@ -2138,7 +1762,6 @@ app.post('/api/profile/update', (req, res) => {
   res.json({ success: true });
 });
 
-// Friends
 app.get('/api/friends', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
   const db = readDB();
@@ -2199,7 +1822,6 @@ app.post('/api/friend-reject', (req, res) => {
   res.json({ success: true });
 });
 
-// Chat
 app.get('/api/chat/list', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
   const db = readDB();
@@ -2236,8 +1858,6 @@ app.post('/api/chat/send', (req, res) => {
     timestamp: Date.now()
   };
   db.messages.push(msg);
-  
-  // AI analysis for chat
   const analysis = analyzeText(text);
   db.aiAnalytics.push({
     type: 'chat',
@@ -2245,7 +1865,6 @@ app.post('/api/chat/send', (req, res) => {
     analysis: analysis,
     timestamp: Date.now()
   });
-  
   writeDB(db);
   res.json({ success: true, ai: analysis });
 });
@@ -2256,14 +1875,12 @@ app.get('/api/admin/data', (req, res) => {
   const db = readDB();
   const user = db.users.find(u => u.id === req.session.userId);
   if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-  
   const stats = getAIAnalytics(db);
   const users = db.users.filter(u => u.verified);
   const posts = db.posts.map(p => {
     const u = db.users.find(usr => usr.id === p.userId);
     return { ...p, userName: u ? u.name : 'Deleted' };
   });
-  
   res.json({ stats, users, posts });
 });
 
@@ -2291,20 +1908,17 @@ app.post('/api/admin/post-delete', (req, res) => {
   res.json({ success: true });
 });
 
-// ========== AI ANALYTICS (Admin only) ==========
 app.get('/api/admin/analytics', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
   const db = readDB();
   const user = db.users.find(u => u.id === req.session.userId);
   if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-  
   const stats = getAIAnalytics(db);
   res.json(stats);
 });
 
 // ========== START SERVER ==========
 app.listen(PORT, () => {
-  console.log('🚀 FaceLove Pro running on port ' + PORT);
-  console.log('📱 Visit http://localhost:' + PORT);
-  console.log('🤖 AI Features: Sentiment Analysis, Smart Suggestions, Hashtags');
+  console.log('FaceLove Pro running on port ' + PORT);
+  console.log('Visit http://localhost:' + PORT);
 });
